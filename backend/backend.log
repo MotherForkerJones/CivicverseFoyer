@@ -1,0 +1,7 @@
+nohup: ignoring input
+
+> civicverse-backend@0.1.0 start
+> node index.js
+
+Backend API listening on 8081
+Killed

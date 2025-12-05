@@ -1,8 +1,7 @@
-{$HOST}:443 {
+:80 {
     reverse_proxy civicverse-frontend:80
-    tls internal
 }
 
-api.{$HOST} {
+:8080 {
     reverse_proxy civicverse-backend:3001
 }

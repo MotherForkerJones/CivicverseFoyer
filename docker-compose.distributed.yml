@@ -1,0 +1,152 @@
+version: '3.9'
+
+# 6-Machine Distributed Stack for CivicverseFoyer
+# Machine 1: Frontend (UI/Dashboard)
+# Machine 2: Backend API (Core Services)
+# Machine 3: Blockchain Nodes (Kaspa, Monero)
+# Machine 4: Mining Pool
+# Machine 5: Smart Contract Executor (Hardhat)
+# Machine 6: Database & Persistence
+
+services:
+  # ===== MACHINE 1: FRONTEND SERVER =====
+  civicverse-frontend:
+    build: ./frontend
+    container_name: frontend-server
+    environment:
+      - NODE_ENV=production
+      - VITE_API_URL=http://backend-api:3001
+      - VITE_DEMO_MODE=true
+      - VITE_ENABLE_ALL_FEATURES=true
+    ports:
+      - "80:80"
+      - "3000:3000"
+      - "5173:5173"
+    networks:
+      - civicverse-network
+    restart: unless-stopped
+    depends_on:
+      - civicverse-backend
+
+  # ===== MACHINE 2: BACKEND API SERVER =====
+  civicverse-backend:
+    build: ./backend
+    container_name: backend-api
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DB_HOST=db-persistence
+      - DB_PORT=5432
+      - DEMO_MODE=true
+      - MINER_URL=http://mining-pool:9090
+      - BLOCKCHAIN_URL=http://kaspa-node:8545
+      - SOCKET_IO_ENABLED=true
+    ports:
+      - "3001:3001"
+      - "8001:8001"
+    networks:
+      - civicverse-network
+    restart: unless-stopped
+    depends_on:
+      - kaspa-node
+      - db-persistence
+      - mining-pool
+
+  # ===== MACHINE 3: BLOCKCHAIN NODES =====
+  kaspa-node:
+    image: alpine:latest
+    container_name: blockchain-nodes
+    command: sh -c "echo 'Kaspa/Monero blockchain node placeholder' && sleep infinity"
+    ports:
+      - "16110:16110"
+      - "18081:18081"
+      - "18083:18083"
+    volumes:
+      - kaspa-data:/root/.kaspad
+      - monero-data:/root/.bitmonero
+    networks:
+      - civicverse-network
+    restart: unless-stopped
+
+  # ===== MACHINE 4: MINING POOL =====
+  mining-pool:
+    image: node:18-alpine
+    container_name: mining-pool
+    working_dir: /app
+    command: sh -c "echo 'Mining pool placeholder' && sleep infinity"
+    ports:
+      - "9090:9090"
+      - "3112:3112"
+    networks:
+      - civicverse-network
+    restart: unless-stopped
+    environment:
+      - PORT=9090
+      - STRATUM_PORT=3112
+      - DEMO_MODE=true
+
+  # ===== MACHINE 5: SMART CONTRACT EXECUTOR (Hardhat) =====
+  hardhat-network:
+    image: node:18-alpine
+    container_name: smart-contract-executor
+    working_dir: /app
+    command: sh -c "echo 'Hardhat placeholder - development network ready' && sleep infinity"
+    ports:
+      - "8545:8545"
+    networks:
+      - civicverse-network
+    restart: unless-stopped
+    environment:
+      - HARDHAT_NETWORK=localhost
+
+  # ===== MACHINE 6: DATABASE & PERSISTENCE =====
+  db-persistence:
+    image: postgres:15-alpine
+    container_name: db-persistence
+    environment:
+      - POSTGRES_DB=civicverse
+      - POSTGRES_USER=civicverse
+      - POSTGRES_PASSWORD=changeme_security_risk
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - civicverse-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U civicverse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===== PROXY/GATEWAY (Optional) =====
+  caddy:
+    image: caddy:2-alpine
+    container_name: api-gateway
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - civicverse-network
+    restart: unless-stopped
+    depends_on:
+      - civicverse-frontend
+      - civicverse-backend
+
+networks:
+  civicverse-network:
+    driver: bridge
+
+volumes:
+  backend-data:
+  db-data:
+  kaspa-data:
+  monero-data:
+  mining-data:
+  caddy-data:
+  caddy-config:

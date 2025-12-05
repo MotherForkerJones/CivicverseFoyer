@@ -1,0 +1,17 @@
+nohup: ignoring input
+
+> civicverse-miner@0.1.0 start
+> node miner.js
+
+miner control listening 9090
+miner: heartbeat cpu=1
+miner: heartbeat cpu=1
+miner: heartbeat cpu=1
+miner: heartbeat cpu=1
+miner: heartbeat cpu=1
+miner: heartbeat cpu=1
+miner: heartbeat cpu=1
+miner: heartbeat cpu=1
+miner: heartbeat cpu=1
+miner: heartbeat cpu=1
+Killed

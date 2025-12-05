@@ -4,6 +4,14 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
+// Demo mode flag
+const DEMO_MODE = process.env.DEMO_MODE === 'true' || true
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, mode: DEMO_MODE ? 'demo' : 'production' })
+})
+
 app.get('/api/market',(req,res)=>{
   res.json(market)
 })
@@ -38,67 +46,97 @@ app.get('/api/miner/status', async (req,res)=>{
   }catch(e){ res.json({ok:false,error:String(e)}) }
 })
 
-// Simulated miner pool and treasury
-let minerPool = [ {id:'local-miner',hashRate:10} ]
-let treasury = {balance: 0.0, currency:'CV', multisig:'0xDEMO_MULTISIG'}
-// Persistence with better-sqlite3
-const Database = require('better-sqlite3')
-const path = require('path')
-const dbPath = path.resolve(__dirname, 'data.db')
-const db = new Database(dbPath)
+// Persistence with better-sqlite3 - gracefully handle if unavailable
+let db
+let market = []
+let citizens = []
+let quests = []
+let minerPool = []
+let nextMarketId = 1
+let treasury = {balance:10000.0, currency:'CV', multisig:'0xDEMO_MULTISIG'}
+let ubi = {pool:50000.0, currency:'CV', lastDistributed:Date.now()}
 
-// create tables if not exist
-db.exec(`
-CREATE TABLE IF NOT EXISTS citizens (id TEXT PRIMARY KEY, name TEXT, balance REAL, created INTEGER, cls TEXT);
-CREATE TABLE IF NOT EXISTS market (id INTEGER PRIMARY KEY, title TEXT, price REAL, sellerId TEXT);
-CREATE TABLE IF NOT EXISTS quests (id INTEGER PRIMARY KEY, title TEXT, reward REAL, claimed INTEGER, claimedBy TEXT);
-CREATE TABLE IF NOT EXISTS miner_pool (id TEXT PRIMARY KEY, hashRate REAL);
-CREATE TABLE IF NOT EXISTS treasury (id INTEGER PRIMARY KEY, balance REAL, currency TEXT, multisig TEXT);
-CREATE TABLE IF NOT EXISTS ubi (id INTEGER PRIMARY KEY, pool REAL, currency TEXT, lastDistributed INTEGER);
-`)
+try {
+  const Database = require('better-sqlite3')
+  const path = require('path')
+  const dbPath = path.resolve(__dirname, 'data.db')
+  db = new Database(dbPath)
 
-// load persisted data into memory-friendly variables
-let citizens = db.prepare('SELECT * FROM citizens').all() || []
-let market = db.prepare('SELECT * FROM market').all() || []
-let quests = db.prepare('SELECT * FROM quests').all() || []
-let minerPool = db.prepare('SELECT * FROM miner_pool').all() || []
-let treasury = db.prepare('SELECT * FROM treasury LIMIT 1').get() || {balance:0.0, currency:'CV', multisig:'0xDEMO_MULTISIG'}
-let ubi = db.prepare('SELECT * FROM ubi LIMIT 1').get() || {pool:0.0, currency:'CV', lastDistributed:null}
+  // create tables if not exist
+  db.exec(`
+  CREATE TABLE IF NOT EXISTS citizens (id TEXT PRIMARY KEY, name TEXT, balance REAL, created INTEGER, cls TEXT);
+  CREATE TABLE IF NOT EXISTS market (id INTEGER PRIMARY KEY, title TEXT, price REAL, sellerId TEXT);
+  CREATE TABLE IF NOT EXISTS quests (id INTEGER PRIMARY KEY, title TEXT, reward REAL, claimed INTEGER, claimedBy TEXT);
+  CREATE TABLE IF NOT EXISTS miner_pool (id TEXT PRIMARY KEY, hashRate REAL);
+  CREATE TABLE IF NOT EXISTS treasury (id INTEGER PRIMARY KEY, balance REAL, currency TEXT, multisig TEXT);
+  CREATE TABLE IF NOT EXISTS ubi (id INTEGER PRIMARY KEY, pool REAL, currency TEXT, lastDistributed INTEGER);
+  `)
 
-// if empty, seed demo data
-if(market.length===0){
-  const insertMarket = db.prepare('INSERT INTO market (title,price,sellerId) VALUES (?,?,?)')
-  insertMarket.run('Neon Jacket',3.5,null)
-  insertMarket.run('Pixel Car',12,null)
-  market = db.prepare('SELECT * FROM market').all()
-}
-if(quests.length===0){
-  const insertQuest = db.prepare('INSERT INTO quests (title,reward,claimed) VALUES (?,?,?)')
-  insertQuest.run('Find the Neon Key',0.5,0)
-  insertQuest.run('Deliver Packet',0.2,0)
-  quests = db.prepare('SELECT * FROM quests').all()
+  // load persisted data into memory-friendly variables
+  citizens = db.prepare('SELECT * FROM citizens').all() || []
+  market = db.prepare('SELECT * FROM market').all() || []
+  quests = db.prepare('SELECT * FROM quests').all() || []
+  minerPool = db.prepare('SELECT * FROM miner_pool').all() || []
+  treasury = db.prepare('SELECT * FROM treasury LIMIT 1').get() || {balance:10000.0, currency:'CV', multisig:'0xDEMO_MULTISIG'}
+  ubi = db.prepare('SELECT * FROM ubi LIMIT 1').get() || {pool:50000.0, currency:'CV', lastDistributed:Date.now()}
+
+  // if empty, seed demo data
+  if(market.length===0){
+    const insertMarket = db.prepare('INSERT INTO market (title,price,sellerId) VALUES (?,?,?)')
+    insertMarket.run('Neon Jacket',3.5,null)
+    insertMarket.run('Pixel Car',12,null)
+    market = db.prepare('SELECT * FROM market').all()
+  }
+  if(quests.length===0){
+    const insertQuest = db.prepare('INSERT INTO quests (title,reward,claimed) VALUES (?,?,?)')
+    insertQuest.run('Find the Neon Key',0.5,0)
+    insertQuest.run('Deliver Packet',0.2,0)
+    quests = db.prepare('SELECT * FROM quests').all()
+  }
+  
+  nextMarketId = Math.max(...market.map(m => m.id), 0) + 1
+
+  console.log('✓ Database initialized with', {citizens: citizens.length, market: market.length, quests: quests.length})
+} catch (e) {
+  console.warn('⚠ Database not available (demo mode):', e.message)
+  // Seed with in-memory demo data
+  market = [
+    {id:1, title:'Neon Jacket', price:3.5, sellerId:null},
+    {id:2, title:'Pixel Car', price:12, sellerId:null}
+  ]
+  quests = [
+    {id:1, title:'Find the Neon Key', reward:0.5, claimed:0, claimedBy:null},
+    {id:2, title:'Deliver Packet', reward:0.2, claimed:0, claimedBy:null}
+  ]
+  nextMarketId = 3
 }
 
 // helper persistence functions
 function persistCitizen(c){
+  if(!db) return
   db.prepare('INSERT OR REPLACE INTO citizens (id,name,balance,created,cls) VALUES (?,?,?,?,?)').run(c.id,c.name,c.balance||0,c.created||Date.now(),c.class||c.cls||null)
 }
 function persistMarket(item){
+  if(!db) return
   db.prepare('INSERT OR REPLACE INTO market (id,title,price,sellerId) VALUES (?,?,?,?)').run(item.id,item.title,item.price,item.sellerId||null)
 }
 function persistQuest(q){
+  if(!db) return
   db.prepare('INSERT OR REPLACE INTO quests (id,title,reward,claimed,claimedBy) VALUES (?,?,?,?,?)').run(q.id,q.title,q.reward,q.claimed?1:0,q.claimedBy||null)
 }
 function persistMiner(m){
+  if(!db) return
   db.prepare('INSERT OR REPLACE INTO miner_pool (id,hashRate) VALUES (?,?)').run(m.id,m.hashRate)
 }
 function persistTreasury(){
+  if(!db) return
   db.prepare('DELETE FROM treasury').run()
   db.prepare('INSERT INTO treasury (id,balance,currency,multisig) VALUES (1,?,?,?)').run(treasury.balance, treasury.currency, treasury.multisig)
 }
 function persistUbi(){
+  if(!db) return
   db.prepare('DELETE FROM ubi').run()
-  db.prepare('INSERT INTO ubi (id,pool,currency,lastDistributed) VALUES (1,?,?,?)').run(1, ubi.pool||0, ubi.currency||'CV', ubi.lastDistributed?ubi.lastDistributed.time:null)
+  db.prepare('INSERT INTO ubi (id,pool,currency,lastDistributed) VALUES (1,?,?,?)').run(ubi.pool||0, ubi.currency||'CV', ubi.lastDistributed)
 }
 
 // Optional on-chain multisig integration (reads balance from chain if RPC configured)
@@ -135,7 +173,6 @@ if(process.env.ENABLE_ONCHAIN === 'true' && process.env.PRIVATE_KEY){
     console.log('On-chain tax sender configured with signer', signer.address)
   }catch(e){ console.warn('Failed to configure signer for on-chain operations', e.message) }
 }
-let nextMarketId = (market.length? Math.max(...market.map(m=>m.id))+1 : 1)
 
 app.get('/api/miner/pool', (req,res)=>{
   const combined = minerPool.reduce((s,m)=>s+m.hashRate,0)
@@ -292,4 +329,5 @@ app.get('/api/news',(req,res)=>{
   res.json([{id:1,who:'Reporter',text:'Demo news: neon parade!'}])
 })
 
-app.listen(8081, ()=>console.log('Backend API listening on 8081'))
+const PORT = process.env.PORT || 3001
+app.listen(PORT, ()=>console.log(`Backend API listening on ${PORT}`))
