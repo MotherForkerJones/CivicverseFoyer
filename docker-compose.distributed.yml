@@ -22,8 +22,10 @@ services:
       - "80:80"
       - "3000:3000"
       - "5173:5173"
+      - "4173:4173"
     networks:
       - civicverse-network
+    command: ["serve", "-s", "dist", "-l", "4173"]
     restart: unless-stopped
     depends_on:
       - civicverse-backend
